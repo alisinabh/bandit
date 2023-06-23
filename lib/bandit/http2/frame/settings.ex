@@ -59,6 +59,13 @@ defmodule Bandit.HTTP2.Frame.Settings do
       {:ok, {0x06, value}}, {:ok, acc} ->
         {:cont, {:ok, %{acc | max_header_list_size: value}}}
 
+      {:ok, {0x08, value}}, {:ok, _acc} when value not in [0, 1] ->
+        {:halt,
+         {:error, Errors.protocol_error(), "Invalid enable_connect_protocol value (RFC8441§3)"}}
+
+      {:ok, {0x08, value}}, {:ok, acc} ->
+        {:cont, {:ok, %{acc | enable_connect_protocol: value == 1}}}
+
       {:ok, {_setting, _value}}, {:ok, acc} ->
         {:cont, {:ok, acc}}
 
@@ -114,6 +121,8 @@ defmodule Bandit.HTTP2.Frame.Settings do
           {:max_frame_size, value} -> <<0x05::16, value::32>>
           {:max_header_list_size, :infinity} -> <<>>
           {:max_header_list_size, value} -> <<0x06::16, value::32>>
+          {:enable_connect_protocol, false} -> <<>>
+          {:enable_connect_protocol, true} -> <<0x08::16, 1::32>>
         end)
 
       [{0x4, 0x0, 0, payload}]

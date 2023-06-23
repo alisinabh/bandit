@@ -131,7 +131,7 @@ defmodule HTTP2FrameSerializationTest do
       frame = %Frame.Settings{ack: false, settings: %Settings{}}
 
       assert Frame.serialize(frame, 16_384) == [
-               [<<0, 0, 0, 4, 0, 0, 0, 0, 0>>, [<<>>, <<>>, <<>>, <<>>, <<>>]]
+               [<<0, 0, 0, 4, 0, 0, 0, 0, 0>>, [<<>>, <<>>, <<>>, <<>>, <<>>, <<>>]]
              ]
     end
 
@@ -143,20 +143,22 @@ defmodule HTTP2FrameSerializationTest do
           max_concurrent_streams: 2000,
           initial_window_size: 3000,
           max_frame_size: 40_000,
-          max_header_list_size: 5000
+          max_header_list_size: 5000,
+          enable_connect_protocol: true
         }
       }
 
       assert Frame.serialize(frame, 16_384)
              ~> [
                [
-                 <<0, 0, 30, 4, 0, 0, 0, 0, 0>>,
+                 <<0, 0, 36, 4, 0, 0, 0, 0, 0>>,
                  in_any_order([
                    <<1::16, 1000::32>>,
                    <<4::16, 3000::32>>,
                    <<3::16, 2000::32>>,
                    <<5::16, 40_000::32>>,
-                   <<6::16, 5000::32>>
+                   <<6::16, 5000::32>>,
+                   <<8::16, 1::32>>
                  ])
                ]
              ]
