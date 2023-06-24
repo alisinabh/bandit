@@ -30,7 +30,12 @@ defmodule ServerHelpers do
             ip: :loopback,
             certfile: Path.join(__DIR__, "../support/cert.pem") |> Path.expand(),
             keyfile: Path.join(__DIR__, "../support/key.pem") |> Path.expand(),
-            thousand_island_options: [read_timeout: 1000]
+            thousand_island_options: [read_timeout: 1000],
+            http_2_options: [
+              default_local_settings: [
+                enable_connect_protocol: Map.get(context, :enable_connect_protocol, false)
+              ]
+            ]
           ]
           |> Keyword.merge(opts)
           |> Bandit.child_spec()

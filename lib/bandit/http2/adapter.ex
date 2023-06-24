@@ -11,7 +11,9 @@ defmodule Bandit.HTTP2.Adapter do
             stream_id: nil,
             end_stream: false,
             content_encoding: nil,
+            upgrade: nil,
             metrics: %{},
+            protocol: nil,
             opts: []
 
   @typedoc "A struct for backing a Plug.Conn.Adapter"
@@ -21,7 +23,9 @@ defmodule Bandit.HTTP2.Adapter do
           stream_id: Bandit.HTTP2.Stream.stream_id(),
           end_stream: boolean(),
           content_encoding: String.t() | nil,
+          upgrade: nil | {:websocket, opts :: keyword(), websocket_opts :: keyword()},
           metrics: map(),
+          protocol: String.t() | nil,
           opts: keyword()
         }
 
@@ -211,6 +215,15 @@ defmodule Bandit.HTTP2.Adapter do
   end
 
   @impl Plug.Conn.Adapter
+  def upgrade(adapter = %{protocol: "websocket"}, :websocket, opts) do
+    websocket_options = Keyword.get(adapter.opts, :websocket, [])
+    {:ok, %{adapter | upgrade: {:websocket, opts, websocket_options}}}
+  end
+
+  def upgrade(_adapter, :websocket, _opts) do
+    {:error, :invalid_h2_websocket_protocol}
+  end
+
   def upgrade(_req, _upgrade, _opts), do: {:error, :not_supported}
 
   @impl Plug.Conn.Adapter

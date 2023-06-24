@@ -63,13 +63,18 @@ defmodule Bandit.HTTP2.StreamTask do
          :ok <- valid_te_header(headers),
          headers <- combine_cookie_crumbs(headers),
          req <- Bandit.HTTP2.Adapter.add_end_header_metric(req),
+         req <- maybe_put_protocol(req, method, pseudo_headers),
          adapter <- {Bandit.HTTP2.Adapter, req},
          {:ok, %Plug.Conn{adapter: {Bandit.HTTP2.Adapter, req}} = conn} <-
            Bandit.Pipeline.run(adapter, transport_info, method, request_target, headers, plug) do
       Bandit.Telemetry.stop_span(span, Map.put(req.metrics, :conn, conn))
       :ok
     else
-      {:error, reason} -> raise Bandit.HTTP2.Stream.StreamError, reason
+      {:ok, :websocket, %Plug.Conn{adapter: {Bandit.HTTP2.Adapter, _req}} = _conn, _upgrade_opts} ->
+        raise "WebSocket not implemented for HTTP/2"
+
+      {:error, reason} ->
+        raise Bandit.HTTP2.Stream.StreamError, reason
     end
   end
 
@@ -119,9 +124,11 @@ defmodule Bandit.HTTP2.StreamTask do
 
   # RFC9113§8.3.1 - only request pseudo headers may appear
   defp pseudo_headers_all_request(headers) do
-    if Enum.any?(headers, fn {key, _value} -> key not in ~w[:method :scheme :authority :path] end),
-      do: {:error, "Received invalid pseudo header"},
-      else: :ok
+    if Enum.any?(headers, fn {key, _value} ->
+         key not in ~w[:method :scheme :authority :path :protocol]
+       end),
+       do: {:error, "Received invalid pseudo header"},
+       else: :ok
   end
 
   # RFC9113§8.3.1 - method, scheme, path pseudo headers must appear exactly once
@@ -170,4 +177,11 @@ defmodule Bandit.HTTP2.StreamTask do
     combined_cookie = Enum.map_join(crumbs, "; ", fn {"cookie", crumb} -> crumb end)
     [{"cookie", combined_cookie} | other_headers]
   end
+
+  # Per RFC8441§5
+  defp maybe_put_protocol(req, "CONNECT", pseudo_headers) do
+    %{req | protocol: Bandit.Headers.get_header(pseudo_headers, ":protocol")}
+  end
+
+  defp maybe_put_protocol(req, _method, _pseudo_headers), do: req
 end

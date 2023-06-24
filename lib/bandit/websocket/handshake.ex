@@ -5,17 +5,19 @@ defmodule Bandit.WebSocket.Handshake do
   import Plug.Conn
 
   @type extensions :: [{String.t(), [{String.t(), String.t() | true}]}]
+  @type http_protcol :: :"HTTP/1.1" | :"HTTP/2"
 
   @spec valid_upgrade?(Plug.Conn.t()) :: boolean()
   def valid_upgrade?(%Plug.Conn{} = conn) do
-    validate_upgrade(conn) == :ok
+    validate_upgrade(get_http_protocol(conn), conn) == :ok
   end
 
-  @spec validate_upgrade(Plug.Conn.t()) :: :ok | {:error, String.t()}
-  defp validate_upgrade(conn) do
+  @spec validate_upgrade(http_protcol(), Plug.Conn.t()) :: :ok | {:error, String.t()}
+  defp validate_upgrade(http_protocol, conn)
+
+  defp validate_upgrade(:"HTTP/1.1", conn) do
     # Cases from RFC6455§4.2.1
-    with {:http_version, :"HTTP/1.1"} <- {:http_version, get_http_protocol(conn)},
-         {:method, "GET"} <- {:method, conn.method},
+    with {:method, "GET"} <- {:method, conn.method},
          {:host_header, header} when header != [] <- {:host_header, get_req_header(conn, "host")},
          {:upgrade_header, true} <-
            {:upgrade_header, header_contains(conn, "upgrade", "websocket")},
@@ -33,16 +35,36 @@ defmodule Bandit.WebSocket.Handshake do
     end
   end
 
-  @spec handshake(Plug.Conn.t(), keyword(), keyword()) ::
-          {:ok, Plug.Conn.t(), Keyword.t()} | {:error, String.t()}
-  def handshake(%Plug.Conn{} = conn, opts, websocket_opts) do
-    with :ok <- validate_upgrade(conn) do
-      do_handshake(conn, opts, websocket_opts)
+  defp validate_upgrade(:"HTTP/2", conn) do
+    # Cases from RFC8441§5
+    with {:method, "CONNECT"} <- {:method, conn.method},
+         # {:host_header, header} when header != [] <- {:host_header, get_req_header(conn, "host")},
+         {:sec_websocket_version_header, ["13"]} <-
+           {:sec_websocket_version_header, get_req_header(conn, "sec-websocket-version")} do
+      :ok
+    else
+      {step, detail} ->
+        {:error, "WebSocket upgrade failed: error in #{step} check: #{inspect(detail)}"}
     end
   end
 
-  @spec do_handshake(Plug.Conn.t(), keyword(), keyword()) :: {:ok, Plug.Conn.t(), keyword()}
-  defp do_handshake(conn, opts, websocket_opts) do
+  defp validate_upgrade(http_protcol, _conn) do
+    {:error, "WebSocket upgrade failed: error in http_protcol check: #{inspect(http_protcol)}"}
+  end
+
+  @spec handshake(Plug.Conn.t(), keyword(), keyword()) ::
+          {:ok, Plug.Conn.t(), Keyword.t()} | {:error, String.t()}
+  def handshake(%Plug.Conn{} = conn, opts, websocket_opts) do
+    http_protcol = get_http_protocol(conn)
+
+    with :ok <- validate_upgrade(http_protcol, conn) do
+      do_handshake(http_protcol, conn, opts, websocket_opts)
+    end
+  end
+
+  @spec do_handshake(http_protcol(), Plug.Conn.t(), keyword(), keyword()) ::
+          {:ok, Plug.Conn.t(), keyword()}
+  defp do_handshake(http_protcol, conn, opts, websocket_opts) do
     requested_extensions = requested_extensions(conn)
 
     {negotiated_params, returned_data} =
@@ -52,7 +74,8 @@ defmodule Bandit.WebSocket.Handshake do
         {nil, []}
       end
 
-    conn = send_handshake(conn, returned_data)
+    conn = send_handshake(http_protcol, conn, returned_data)
+
     {:ok, conn, Keyword.put(opts, :compress, negotiated_params)}
   end
 
@@ -87,8 +110,8 @@ defmodule Bandit.WebSocket.Handshake do
     end)
   end
 
-  @spec send_handshake(Plug.Conn.t(), extensions()) :: Plug.Conn.t()
-  defp send_handshake(%Plug.Conn{} = conn, extensions) do
+  @spec send_handshake(http_protcol(), Plug.Conn.t(), extensions()) :: Plug.Conn.t()
+  defp send_handshake(:"HTTP/1.1", %Plug.Conn{} = conn, extensions) do
     # Taken from RFC6455§4.2.2/5. Note that we can take for granted the existence of the
     # sec-websocket-key header in the request, since we check for it in the handshake? call above
     [client_key] = get_req_header(conn, "sec-websocket-key")
@@ -101,6 +124,15 @@ defmodule Bandit.WebSocket.Handshake do
     |> put_resp_header("upgrade", "websocket")
     |> put_resp_header("connection", "Upgrade")
     |> put_resp_header("sec-websocket-accept", server_key)
+    |> put_websocket_extension_header(extensions)
+    |> send_resp()
+  end
+
+  defp send_handshake(:"HTTP/2", %Plug.Conn{} = conn, extensions) do
+    # Taken from RFC8441§5
+
+    conn
+    |> resp(200, "")
     |> put_websocket_extension_header(extensions)
     |> send_resp()
   end

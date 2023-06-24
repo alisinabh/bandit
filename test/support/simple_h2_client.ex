@@ -14,7 +14,8 @@ defmodule SimpleH2Client do
 
   def exchange_prefaces(socket) do
     :ssl.send(socket, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
-    {:ok, <<0, 0, 0, 4, 0, 0, 0, 0, 0>>} = :ssl.recv(socket, 9)
+    {:ok, <<len::24, 4, 0, 0, 0, 0, 0>>} = :ssl.recv(socket, 9)
+    if len > 0, do: {:ok, <<_settings::binary-size(len)>>} = :ssl.recv(socket, len)
     :ssl.send(socket, <<0, 0, 0, 4, 1, 0, 0, 0, 0>>)
   end
 
